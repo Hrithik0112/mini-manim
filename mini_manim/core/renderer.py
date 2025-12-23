@@ -226,19 +226,24 @@ class CairoRenderer:
             subprocess.CalledProcessError: If FFmpeg fails.
         """
         # FFmpeg command to pipe PNG frames and encode to MP4
+        # Using -framerate instead of -r for input, and -r for output
         cmd = [
             'ffmpeg',
             '-y',  # Overwrite output file
             '-f', 'image2pipe',  # Input format: pipe
             '-vcodec', 'png',  # Input codec
-            '-r', str(fps),  # Frame rate
+            '-framerate', str(fps),  # Input frame rate
             '-s', f'{self.width}x{self.height}',  # Frame size
             '-i', '-',  # Read from stdin
             '-c:v', 'libx264',  # Video codec
             '-pix_fmt', 'yuv420p',  # Pixel format (compatible with most players)
+            '-r', str(fps),  # Output frame rate
             '-crf', '23',  # Quality (18-28, lower = better quality)
+            '-loglevel', 'error',  # Only show errors
             output_path
         ]
+        
+        import threading
         
         try:
             # Start FFmpeg process
@@ -246,34 +251,69 @@ class CairoRenderer:
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0  # Unbuffered
+                stderr=subprocess.PIPE
             )
+            
+            # Collect stderr in a separate thread
+            stderr_lines = []
+            def collect_stderr():
+                for line in proc.stderr:
+                    stderr_lines.append(line.decode('utf-8', errors='ignore'))
+            
+            stderr_thread = threading.Thread(target=collect_stderr, daemon=True)
+            stderr_thread.start()
             
             # Render frames and pipe to FFmpeg
             frame_count = 0
+            error_occurred = False
+            error_message = None
+            
             try:
                 for frame_bytes in self.render_scene(scene, fps, background_color):
-                    if proc.stdin is None:
+                    # Check if process is still alive
+                    if proc.poll() is not None:
+                        error_occurred = True
+                        error_message = "FFmpeg process terminated early"
                         break
-                    proc.stdin.write(frame_bytes)
-                    proc.stdin.flush()  # Ensure frame is written
-                    frame_count += 1
-            except BrokenPipeError:
-                # FFmpeg closed the pipe early, check for errors
-                pass
+                    
+                    try:
+                        proc.stdin.write(frame_bytes)
+                        proc.stdin.flush()
+                        frame_count += 1
+                    except (BrokenPipeError, OSError, ValueError) as e:
+                        error_occurred = True
+                        error_message = str(e)
+                        break
+                        
+            except Exception as e:
+                error_occurred = True
+                error_message = str(e)
+                if proc.poll() is None:
+                    proc.terminate()
             finally:
                 # Close stdin to signal end of input
-                if proc.stdin:
-                    proc.stdin.close()
+                if proc.stdin and not proc.stdin.closed:
+                    try:
+                        proc.stdin.close()
+                    except:
+                        pass
             
             # Wait for FFmpeg to finish
-            stdout, stderr = proc.communicate()
+            proc.wait()
+            stderr_thread.join(timeout=1.0)  # Wait for stderr collection
             
-            if proc.returncode != 0:
-                error_msg = stderr.decode('utf-8', errors='ignore')
+            # Get stderr output
+            stderr_output = ''.join(stderr_lines)
+            
+            if proc.returncode != 0 or error_occurred:
+                if stderr_output:
+                    error_msg = stderr_output
+                elif error_message:
+                    error_msg = error_message
+                else:
+                    error_msg = f"FFmpeg exited with code {proc.returncode}"
                 raise subprocess.CalledProcessError(
-                    proc.returncode,
+                    proc.returncode if proc.returncode else 1,
                     cmd,
                     f"FFmpeg failed: {error_msg}"
                 )
