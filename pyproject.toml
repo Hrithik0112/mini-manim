@@ -1,0 +1,22 @@
+[project]
+name = "mini-manim"
+version = "0.1.0"
+description = "A minimal, programmatic animation engine inspired by Manim"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pycairo>=1.26.0",
+    "numpy>=1.26.0",
+    "click>=8.1.0",
+]
+
+[project.scripts]
+mini-manim = "mini_manim.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
+
