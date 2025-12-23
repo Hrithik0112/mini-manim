@@ -8,10 +8,12 @@ from abc import ABC, abstractmethod
 from typing import Callable, Any
 import numpy as np
 
+from typing import TYPE_CHECKING
+
 from mini_manim.easing import linear
 from mini_manim.core.mobject import MObject
 
-if False:  # TYPE_CHECKING:
+if TYPE_CHECKING:
     pass
 
 
